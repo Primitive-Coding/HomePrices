@@ -240,11 +240,12 @@ class Zillow:
             except NoSuchElementException:
                 fail_count += 1
                 start_card_index += 1
-                self.scroll_page(pixel_to_scroll=1500, by_pixel=True)
-                if fail_count >= 10:
+
+                if fail_count >= 20:
                     # self._click_button(next_page, wait=True)
                     scraping = False
-
+            if start_card_index % 5 == 0:
+                self.scroll_page(pixel_to_scroll=500, by_pixel=True)
             # if start_card_index == 15:
             #     self.scroll_page(pixel_to_scroll=500, by_pixel=True)
         self._clean_close()
@@ -466,6 +467,7 @@ class Zillow:
 
         all_df = all_df.drop_duplicates("address", keep="first")
         all_df.reset_index(drop=True, inplace=True)
+        all_df.set_index("date", inplace=True)
         print(f"All: {all_df}")
         if export:
             all_df.to_csv(f"Data\\Zillow\\{self.label}.csv")

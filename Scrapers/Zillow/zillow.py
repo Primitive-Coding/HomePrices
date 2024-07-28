@@ -5,6 +5,7 @@ import json
 import time
 import datetime as dt
 
+import numpy as np
 import pandas as pd
 
 # Periphery
@@ -33,7 +34,7 @@ my_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (K
 chrome_options = webdriver.ChromeOptions()
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-popup-blocking")
-chrome_options.add_argument(f"--user-agent={user_agents[2]}")
+chrome_options.add_argument(f"--user-agent={user_agents[0]}")
 # chrome_options.add_argument("--headless") NOTE: Running in headless will result in empty dataframes.
 chrome_options.add_argument("--disable-gpu")
 
@@ -182,6 +183,25 @@ class Zillow:
                 self.browser.execute_script("arguments[0].click();", element)
             element.click()
 
+    def scroll_page(
+        self,
+        pixel_to_scroll: int = 500,
+        element_to_scroll="",
+        by_pixel: bool = True,
+        by_element: bool = False,
+    ) -> None:
+        """
+        :param element_to_scroll: Scroll to the specified element on the webpage.
+        :returns: There is no data to return.
+        """
+        if by_pixel:
+            self.browser.execute_script(f"window.scrollBy(0, {pixel_to_scroll})", "")
+
+        if by_element:
+            self.browser.execute_script(
+                "arguments[0].scrollIntoView(true);", element_to_scroll
+            )
+
     """
     ====================================
     Browser Operations
@@ -212,7 +232,7 @@ class Zillow:
         while scraping:
             try:
                 current_card = card_xpath.format(start_card_index)
-                c = self._scrape_card(current_card)
+                c = self._scrape_card2(current_card)
                 if c != {}:
                     card_data.append(c)
                     print(f"--------------------------[Card]: {card_data}")
@@ -220,10 +240,13 @@ class Zillow:
             except NoSuchElementException:
                 fail_count += 1
                 start_card_index += 1
-
-                if fail_count >= 5:
+                self.scroll_page(pixel_to_scroll=1500, by_pixel=True)
+                if fail_count >= 10:
                     # self._click_button(next_page, wait=True)
                     scraping = False
+
+            # if start_card_index == 15:
+            #     self.scroll_page(pixel_to_scroll=500, by_pixel=True)
         self._clean_close()
         df = pd.DataFrame(card_data)
 
@@ -253,31 +276,43 @@ class Zillow:
         sqft_xpath = f"{xpath}/div/div/article/div/div[1]/div[3]/ul/li[3]/b"
         location_xpath = f"{xpath}/div/div/article/div/div[1]/a/address"
 
-        # is_ad = self.is_advertisement(ad_xpath, sponsor_xpath)
-        is_ad = False
+        is_ad = self.is_advertisement(ad_xpath, sponsor_xpath)
+
         if not is_ad:
             # Get date & clean
             date = self._read_data(date_xpath, wait=True)
             date = date.split(" ")[1]
 
             # Get price & clean data
-            price = self._read_data(price_xpath, wait=True)
-            price = price.replace("$", "").replace(",", "")
-            if "M" in price:
-                price = price.replace("M", "")
-                price = float(price) * 1_000_000
+            try:
+                price = self._read_data(price_xpath, wait=True)
+                price = price.replace("$", "").replace(",", "")
+                if "M" in price:
+                    price = price.replace("M", "")
+                    price = float(price) * 1_000_000
 
-            price = int(price)
+                price = int(price)
+            except ValueError:
+                price = np.nan
             # Get number of bedrooms and clean
-            bedrooms = self._read_data(bed_xpath, wait=True)
-            bedrooms = int(bedrooms)
+            try:
+                bedrooms = self._read_data(bed_xpath, wait=True)
+                bedrooms = int(bedrooms)
+            except ValueError:
+                bedrooms = np.nan
             # Get number of bathrooms and clean
-            bathrooms = self._read_data(bath_xpath, wait=True)
-            bathrooms = int(bathrooms)
+            try:
+                bathrooms = self._read_data(bath_xpath, wait=True)
+                bathrooms = int(bathrooms)
+            except ValueError:
+                bathrooms = np.nan
             # Get sqft and clean
-            sqft = self._read_data(sqft_xpath, wait=True)
-            sqft = sqft.replace(",", "")
-            sqft = int(sqft)
+            try:
+                sqft = self._read_data(sqft_xpath, wait=True)
+                sqft = sqft.replace(",", "")
+                sqft = int(sqft)
+            except ValueError:
+                sqft = np.nan
             # Get Location and clean
             location = self._read_data(location_xpath, wait=True)
             address, city, state = location.split(",")
@@ -286,10 +321,89 @@ class Zillow:
             state = state.strip(" ")
 
             # Calculate price/sqft
-            price_sqft = price / sqft
-            price_sqft = "{:,.2f}".format(price_sqft)
+            try:
+                price_sqft = price / sqft
+                price_sqft = "{:,.2f}".format(price_sqft)
+            except ValueError:
+                price_sqft = np.nan
 
             data = {
+                "date": date,
+                "price": price,
+                "bedrooms": bedrooms,
+                "bathrooms": bathrooms,
+                "sqft": sqft,
+                "$/sqft": price_sqft,
+                "address": address,
+                "city": city,
+                "state": state,
+            }
+            return data
+        else:
+            return {}
+
+    def _scrape_card2(self, xpath: str):
+        ad_xpath = f"{xpath}/html/body/div[2]/div[1]/div/a/div[1]/div[1]"
+        sponsor_xpath = f"{xpath}/html/body/div[2]/div[1]/div/a/div[1]/div[1]"
+        date_xpath = f"{xpath}/div/div/article/div/div[2]/div[1]/div[1]/span"
+        price_xpath = f"{xpath}/div/div/article/div/div[1]/div[2]/div/span"
+        bed_xpath = f"{xpath}/div/div/article/div/div[1]/div[3]/ul/li[1]/b"
+        bed_xpath = f"{xpath}/div/div/article/div/div[1]/div[3]/ul/li[1]/b"
+        bath_xpath = f"{xpath}/div/div/article/div/div[1]/div[3]/ul/li[2]/b"
+        sqft_xpath = f"{xpath}/div/div/article/div/div[1]/div[3]/ul/li[3]/b"
+        location_xpath = f"{xpath}/div/div/article/div/div[1]/a/address"
+        # Get date & clean
+        date = self._read_data(date_xpath, wait=True)
+        date = date.split(" ")
+
+        if len(date) == 2:
+            date = date[1]
+            # Get price & clean data
+            try:
+                price = self._read_data(price_xpath, wait=True)
+                price = price.replace("$", "").replace(",", "")
+                if "M" in price:
+                    price = price.replace("M", "")
+                    price = float(price) * 1_000_000
+
+                price = int(price)
+            except ValueError:
+                price = np.nan
+            # Get number of bedrooms and clean
+            try:
+                bedrooms = self._read_data(bed_xpath, wait=True)
+                bedrooms = int(bedrooms)
+            except ValueError:
+                bedrooms = np.nan
+            # Get number of bathrooms and clean
+            try:
+                bathrooms = self._read_data(bath_xpath, wait=True)
+                bathrooms = int(bathrooms)
+            except ValueError:
+                bathrooms = np.nan
+            # Get sqft and clean
+            try:
+                sqft = self._read_data(sqft_xpath, wait=True)
+                sqft = sqft.replace(",", "")
+                sqft = int(sqft)
+            except ValueError:
+                sqft = np.nan
+            # Get Location and clean
+            location = self._read_data(location_xpath, wait=True)
+            address, city, state = location.split(",")
+            city = city.strip(" ")
+            state = state.split(" ")[1]
+            state = state.strip(" ")
+
+            # Calculate price/sqft
+            try:
+                price_sqft = price / sqft
+                price_sqft = "{:,.2f}".format(price_sqft)
+            except ValueError:
+                price_sqft = np.nan
+
+            data = {
+                "date": date,
                 "price": price,
                 "bedrooms": bedrooms,
                 "bathrooms": bathrooms,
@@ -332,7 +446,7 @@ class Zillow:
         # print(f"DF: {df}")
         # df.to_csv(f"{self.data_export_path}\\martinez_ca.csv")
 
-    def compile_pages(self):
+    def compile_pages(self, export: bool = False):
         dirs = os.listdir("Pages")
         all_df = pd.DataFrame()
         index = 0
@@ -345,10 +459,13 @@ class Zillow:
             if index == 0:
                 all_df = df
             else:
+
                 all_df = pd.concat([all_df, df], ignore_index=True)
 
             index += 1
 
         all_df = all_df.drop_duplicates("address", keep="first")
         all_df.reset_index(drop=True, inplace=True)
-        all_df.to_csv(f"Data\\Zillow\\{self.label}.csv")
+        print(f"All: {all_df}")
+        if export:
+            all_df.to_csv(f"Data\\Zillow\\{self.label}.csv")
